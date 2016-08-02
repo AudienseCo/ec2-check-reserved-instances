@@ -4,6 +4,7 @@ import sys
 import os
 import boto
 from pprint import pprint
+from datetime import datetime, timedelta
 
 # You can uncomment and set these, or set the env variables AWSAccessKeyId & AWSSecretKey
 # AWS_ACCESS_KEY_ID="aaaaaaaaaaaaaaaaaaaa"
@@ -12,16 +13,30 @@ from pprint import pprint
 try:
 	AWS_ACCESS_KEY_ID
 except NameError:
-	try:
-		AWS_ACCESS_KEY_ID=os.environ['AWSAccessKeyId']
-		AWS_SECRET_ACCESS_KEY=os.environ['AWSSecretKey']
-	except KeyError:
-		print "Please set env variable"
-		sys.exit(1)
+    try:
+        AWS_ACCESS_KEY_ID=os.environ['AWS_ACCESS_KEY']
+        AWS_SECRET_ACCESS_KEY=os.environ['AWS_SECRET_ACCESS_KEY']
+    except KeyError:
+    	print "Please set env variable"
+        sys.exit(1)
 
 
 ec2_conn = boto.connect_ec2(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 reservations = ec2_conn.get_all_instances()
+
+def check_available_reservations(instance_type, availability_zone):
+	max_duration=16070400 #seconds
+#	print "Checking for {} zone {}".format(instance_type,availability_zone)
+	for description in ["Linux/UNIX", "Linux/UNIX (Amazon VPC)"]:
+		offers = ec2_conn.get_all_reserved_instances_offerings(instance_type=instance_type,availability_zone=availability_zone,max_duration=max_duration,product_description=description,instance_tenancy='default')
+		for o in offers:
+			print " - Available reservation for {} days. Type: {}. Zone: {}".format(time_to_days(o.duration), o.instance_type, o.availability_zone)
+			#print o.describe()
+			#pprint(vars(o))
+
+
+def time_to_days(secs):
+    return "{}".format(secs/(60*60*24))
 
 running_instances = {}
 for reservation in reservations:
@@ -31,9 +46,9 @@ for reservation in reservations:
 		elif instance.spot_instance_request_id:
 			sys.stderr.write("Disqualifying instance %s: spot\n" % ( instance.id ) )
 		else:
-			if instance.vpc_id:
-				print "Does not support vpc yet, please be careful when trusting these results"
-			else:
+#			if instance.vpc_id:
+#				print "Does not support vpc yet, please be careful when trusting these results"
+#			else:
 				az = instance.placement
 				instance_type = instance.instance_type
 				running_instances[ (instance_type, az ) ] = running_instances.get( (instance_type, az ) , 0 ) + 1
@@ -80,8 +95,11 @@ if unreserved_instances == {}:
 else:
 	for unreserved_instance in unreserved_instances:
 		print "Instance not reserved:\t(%s)\t%s\t%s" % ( unreserved_instances[ unreserved_instance ], unreserved_instance[0], unreserved_instance[1] )
+		check_available_reservations(unreserved_instance[0], unreserved_instance[1])
 
 qty_running_instances = reduce( lambda x, y: x+y, running_instances.values() )
 qty_reserved_instances = reduce( lambda x, y: x+y, reserved_instances.values() )
 
 print "\n(%s) running on-demand instances\n(%s) reservations" % ( qty_running_instances, qty_reserved_instances )
+
+
